@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Network Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .scen li { grid-template-columns: 200px 1fr 90px; min-height: 34px; }
+  .scen .track { height: 20px; }
+  @media (max-width: 520px) { .scen li { grid-template-columns: 120px 1fr 70px; } }
+  .scen li.base .nm { color: var(--text-2); }
+  .maps h3 span { color: var(--text-3); font-weight: 500; }
+  svg.dumb .base { fill: var(--surface); stroke: var(--text-2); stroke-width: 2; }
+  svg.dumb .link { stroke: var(--text-3); stroke-width: 2; }
+  svg.dumb .name { font-size: 12px; fill: var(--text); }
+  svg.dumb .delta { font-size: 12px; fill: var(--text-2); }
+  svg.dumb .rowbg { fill: transparent; }
+  svg.dumb .rowbg:hover { fill: var(--grid); }
+</style>
+<script src="js/ui.js"></script>
+<script src="js/france-map-background.js"></script>
+<script src="js/map.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav class="top"><a href="index.html">Overview</a><a href="co2.html">CO₂ · sustainability</a><a href="cost.html">Cost · operations</a><a class="on" href="network.html">Network · strategy</a></nav>
+  <header class="page">
+    <p class="eyebrow">For the strategic / network planning manager</p>
+    <h1>Should we open a warehouse in Bordeaux or Marseille, or close Lille?</h1>
+    <p class="lede">Decision this supports: which of four discrete network configurations serves the customer base with the least distance — a first, distance-only pass before a full investment study.</p>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+  <div class="caveat" id="caveat"></div>
+
+  <h2 class="section">Comparing the four options</h2>
+  <p class="why">These configurations are <b>discrete, mutually exclusive choices</b>, not points on a continuum — a line chart would suggest you could interpolate between "3 warehouses" and "4 warehouses". One <b>bar per option, sorted best to worst</b>, answers the question directly. The table shows the same options through the two other dashboards' KPIs.</p>
+  <div class="grid g-5-7">
+    <section class="card">
+      <h3>Average distance per resident</h3>
+      <p class="sub">Population-weighted distance to the serving warehouse. Lower is better.</p>
+      <ul class="rows scen" id="scen"></ul>
+    </section>
+    <section class="card">
+      <h3>The same options, seen by all three managers</h3>
+      <p class="sub">Change vs today, with the same assumptions as the CO₂ and cost dashboards.</p>
+      <div class="table-wrap"><table id="multi"></table></div>
+      <p class="note" id="multiNote"></p>
+    </section>
+  </div>
+
+  <h2 class="section">Why: today vs an alternative</h2>
+  <p class="why">This decision is <b>about geographic coverage</b>, so here the map is the main evidence, not decoration. Two <b>small multiples</b> on the same frame: each city is coloured by the warehouse that serves it (one fixed colour per warehouse), and each warehouse is a triangle.</p>
+  <div class="seg-ctrl" id="pick" style="margin-bottom:14px"></div>
+  <div class="grid g2 maps">
+    <section class="card"><h3>Today <span id="baseW"></span></h3><svg class="map" id="mapBase" role="img" aria-label="Current network map"></svg></section>
+    <section class="card"><h3 id="altTitle"></h3><svg class="map" id="mapAlt" role="img" aria-label="Alternative network map"></svg></section>
+  </div>
+  <div class="legend mt" id="legend"></div>
+
+  <h2 class="section">Who gains, who loses</h2>
+  <p class="why">The average hides <b>who</b> the option is for. A <b>dumbbell chart</b> pairs each affected city's distance today (hollow) with its distance under the option (filled): the gap is what it gains or loses, and cities are sorted by how many residents × kilometres are at stake. A bar of differences would lose the starting point; a map shows who changes colour but not by how much.</p>
+  <section class="card">
+    <h3 id="dumbTitle"></h3>
+    <p class="sub" id="dumbSub"></p>
+    <svg class="chart dumb" id="dumb" role="img" aria-label="Distance per affected city, today vs option"></svg>
+  </section>
+
+  <footer>Recomputed by a GitHub Action from <code>data/cities.csv</code> · Straight-line distances from real coordinates</footer>
+</div>
+<div id="tip"></div>
+<script>
+UI.load('data/network.json').then(d => {
+  const { $, fmt, esc, row } = UI;
+  const S = d.scenarios;                                  // sorted best -> worst
+  const base = S.find(s => s.scenario.startsWith('baseline'));
+  const best = S[0];
+  const lille = S.find(s => s.scenario.startsWith('- Lille'));
+  const label = s => s.scenario.startsWith('baseline') ? 'Today (Paris, Lyon, Lille)' : s.scenario.replace('(close it)', '').trim();
+
+  $('kpis').innerHTML = `
+    <div class="card kpi"><div class="k">Today</div><div class="v num">${fmt(base.avg_distance_km_population_weighted, 1)} <small>km per resident</small></div><div class="d num">worst city ${fmt(base.max_city_distance_km)} km away</div></div>
+    <div class="card kpi"><div class="k">Best option: ${esc(best.scenario)}</div><div class="v num">${fmt(best.avg_distance_km_population_weighted, 1)} <small>km</small></div><div class="d num">${UI.pct(1 - best.avg_distance_km_population_weighted / base.avg_distance_km_population_weighted)} shorter on average</div></div>
+    <div class="card kpi"><div class="k">Best worst-case</div><div class="v num">${fmt(Math.min(...S.map(s => s.max_city_distance_km)))} <small>km</small></div><div class="d">${esc(S.slice().sort((a, b) => a.max_city_distance_km - b.max_city_distance_km)[0].scenario)} — the only option that shortens the longest route</div></div>
+    <div class="card kpi"><div class="k">Closing Lille</div><div class="v num">+${fmt(lille.avg_distance_km_population_weighted - base.avg_distance_km_population_weighted, 1)} <small>km</small></div><div class="d">worse, although Lille ships to no other city</div></div>`;
+  $('caveat').innerHTML = '<b>What this does not capture:</b> the capital cost of opening a warehouse, the lease-exit cost of closing one, the extra fixed cost of running four sites, or Lille\'s non-distance value such as cross-border access to Belgium and the UK. Distance is one input to the decision, not the whole decision.';
+
+  // ---- scenario bars
+  const max = Math.max(...S.map(s => s.avg_distance_km_population_weighted));
+  $('scen').innerHTML = S.map((s, i) => `<li class="${s === base ? 'base' : ''}" data-i="${i}"><span class="nm">${s === best ? '<b>' + esc(label(s)) + '</b>' : esc(label(s))}</span>
+    <span class="track"><span class="seg" style="width:${s.avg_distance_km_population_weighted / max * 100}%;background:${s === best ? 'var(--accent)' : s === base ? 'var(--text-3)' : 'var(--land-line)'};border-radius:0 4px 4px 0"></span></span>
+    <span class="val num"><b>${fmt(s.avg_distance_km_population_weighted, 1)}</b> km</span></li>`).join('');
+  $('scen').querySelectorAll('li').forEach(li => { const s = S[+li.dataset.i];
+    UI.bindTip(li, `<div class="tt-title">${esc(label(s))}</div>` + row('Warehouses', s.warehouses.join(', ')) + row('Avg distance', fmt(s.avg_distance_km_population_weighted, 1) + ' km') + row('Worst city', fmt(s.max_city_distance_km) + ' km')); });
+
+  // ---- multi-objective table
+  const dlt = (v, b, unit, dec = 0) => { const x = v - b; if (Math.abs(x) < 1e-9) return '<span>—</span>';
+    return `<span class="${x < 0 ? 'delta-good' : 'delta-bad'}">${x < 0 ? '−' : '+'}${fmt(Math.abs(x), dec)}${unit}</span>`; };
+  $('multi').innerHTML = `<thead><tr><th>Option</th><th>Avg distance</th><th>Worst city</th><th>CO₂ / year</th><th>Transport cost</th></tr></thead><tbody>` +
+    S.map(s => `<tr class="${s === best ? 'best' : ''}"><td>${esc(label(s))}</td>
+      <td class="num">${s === base ? fmt(s.avg_distance_km_population_weighted, 1) + ' km' : dlt(s.avg_distance_km_population_weighted, base.avg_distance_km_population_weighted, ' km', 1)}</td>
+      <td class="num">${s === base ? fmt(s.max_city_distance_km) + ' km' : dlt(s.max_city_distance_km, base.max_city_distance_km, ' km')}</td>
+      <td class="num">${s === base ? UI.tonnes(s.total_co2_kg) : dlt(s.total_co2_kg / 1000, base.total_co2_kg / 1000, ' t')}</td>
+      <td class="num">${s === base ? UI.eurM(s.transport_cost_eur) : dlt(s.transport_cost_eur / 1e6, base.transport_cost_eur / 1e6, ' M€', 2)}</td>
+</tr>`).join('') + '</tbody>';
+  $('multiNote').textContent = `All three managers rank the options the same way here: CO₂ and transport cost are both proportional to tonne-kilometres, and storage cost (${UI.eurM(base.storage_cost_eur)} a year) depends only on tonnes, which no option changes, so it is left out of the table. Under these assumptions ${best.scenario} wins on every KPI — the disagreement can only come from what the model leaves out (see the caveat above).`;
+
+  // ---- maps + dumbbell for a chosen alternative
+  const alts = S.filter(s => s !== base);
+  let pick = best;
+  $('pick').innerHTML = alts.map((s, i) => `<button data-i="${i}" class="${s === pick ? 'on' : ''}">${esc(label(s))}</button>`).join('');
+  $('pick').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    pick = alts[+b.dataset.i]; $('pick').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); renderAlt();
+  }));
+  const all = new Set(); S.forEach(s => s.warehouses.forEach(w => all.add(w)));
+  $('legend').innerHTML = [...all].map(w => `<span><i style="background:${UI.whColor(w)}"></i>${esc(w)}</span>`).join('') + '<span><i class="tri"></i>Warehouse</span><span style="color:var(--text-3)">Circle size = population</span>';
+  $('baseW').textContent = '· ' + base.warehouses.join(', ');
+
+  const baseCities = d.scenario_cities[base.scenario];
+  const maxPop = Math.max(...baseCities.map(c => c.population));
+  function mapOpts(cities) {
+    return {
+      lineColor: c => UI.whColor(c.warehouse), lineWidth: () => 1.8, lineOpacity: .6,
+      dotColor: c => UI.whColor(c.warehouse), dotR: c => 3 + 8 * Math.sqrt(c.population / maxPop),
+      whFill: c => UI.whColor(c.city), whR: 10, label: () => false,
+      tip: c => `<div class="tt-title">${esc(c.city)}${c.city === c.warehouse ? ' (warehouse)' : ''}</div>` + row('Served by', esc(c.warehouse)) + row('Distance', fmt(c.distance_km) + ' km') + row('Population', fmt(c.population)),
+    };
+  }
+  drawNetworkMap($('mapBase'), baseCities, mapOpts(baseCities));
+
+  function renderAlt() {
+    const cities = d.scenario_cities[pick.scenario];
+    $('altTitle').innerHTML = `${esc(label(pick))} <span>· ${esc(pick.warehouses.join(', '))}</span>`;
+    drawNetworkMap($('mapAlt'), cities, mapOpts(cities));
+
+    // dumbbell: only cities whose distance changes
+    const b = Object.fromEntries(baseCities.map(c => [c.city, c]));
+    const ch = cities.map(c => ({ ...c, before: b[c.city].distance_km, beforeWh: b[c.city].warehouse }))
+      .filter(c => Math.abs(c.distance_km - c.before) > 0.05)
+      .sort((x, y) => Math.abs(y.distance_km - y.before) * y.population - Math.abs(x.distance_km - x.before) * x.population);
+    const gainers = ch.filter(c => c.distance_km < c.before).length;
+    $('dumbTitle').textContent = `${label(pick)}: ${ch.length} ${ch.length === 1 ? 'city changes' : 'cities change'} distance`;
+    const resKm = ch.reduce((s, c) => s + (c.before - c.distance_km) * c.population, 0);
+    $('dumbSub').textContent = ch.length ? `${gainers} get closer, ${ch.length - gainers} get further. Net: ${fmt(Math.abs(resKm / 1e6), 1)} million resident-km ${resKm >= 0 ? 'saved' : 'added'}.` : 'No city changes warehouse.';
+    const svg = $('dumb');
+    const W = Math.max(340, Math.round(svg.getBoundingClientRect().width) || 640), rowH = 30, m = { l: W < 500 ? 104 : 150, r: 80, t: 24, b: 10 }, H = m.t + m.b + Math.max(1, ch.length) * rowH;
+    const xmax = Math.max(100, ...ch.map(c => Math.max(c.before, c.distance_km)));
+    const step = (W < 500 ? 2 : 1) * (xmax > 300 ? 100 : 50);
+    const x = v => m.l + v / (Math.ceil(xmax / step) * step) * (W - m.l - m.r);
+    let g = '';
+    for (let v = 0; v <= Math.ceil(xmax / step) * step; v += step)
+      g += `<line class="gridline" x1="${x(v)}" x2="${x(v)}" y1="${m.t - 6}" y2="${H - m.b}"/><text class="axis num" x="${x(v)}" y="${m.t - 10}" text-anchor="middle">${v} km</text>`;
+    ch.forEach((c, i) => {
+      const y = m.t + i * rowH + rowH / 2, col = UI.whColor(c.warehouse);
+      const dlt = c.distance_km - c.before;
+      g += `<rect class="rowbg" data-i="${i}" x="0" y="${y - rowH / 2}" width="${W}" height="${rowH}" rx="6"/>`;
+      g += `<text class="name" x="${m.l - 12}" y="${y + 4}" text-anchor="end">${esc(c.city)}</text>`;
+      g += `<line class="link" x1="${x(c.before)}" x2="${x(c.distance_km)}" y1="${y}" y2="${y}"/>`;
+      g += `<circle class="base" cx="${x(c.before)}" cy="${y}" r="6"/>`;
+      g += `<circle cx="${x(c.distance_km)}" cy="${y}" r="7" fill="${col}" stroke="var(--surface)" stroke-width="2"/>`;
+      g += `<text class="delta num" x="${W - m.r + 12}" y="${y + 4}"><tspan fill="${dlt < 0 ? 'var(--good)' : 'var(--warn)'}" font-weight="600">${dlt < 0 ? '−' : '+'}${fmt(Math.abs(dlt))} km</tspan></text>`;
+    });
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = ch.length ? g : `<text class="axis" x="${W / 2}" y="40" text-anchor="middle">No city changes distance</text>`;
+    svg.querySelectorAll('.rowbg').forEach(r => { const c = ch[+r.dataset.i];
+      UI.bindTip(r, `<div class="tt-title">${esc(c.city)}</div>` + row('Today', `${fmt(c.before)} km from ${esc(c.beforeWh)}`) + row('Option', `${fmt(c.distance_km)} km from ${esc(c.warehouse)}`) + row('Population', fmt(c.population))); });
+  }
+  renderAlt();
+  let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(renderAlt, 150); });
+}).catch(e => UI.fail(document.querySelector('.wrap'), e));
+</script>
+</body>
+</html>
