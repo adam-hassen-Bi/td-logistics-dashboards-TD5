@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logistics Network Dashboards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="js/ui.js"></script>
+<script src="js/france-map-background.js"></script>
+<script src="js/map.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav class="top"><a class="on" href="index.html">Overview</a><a href="co2.html">CO₂ · sustainability</a><a href="cost.html">Cost · operations</a><a href="network.html">Network · strategy</a></nav>
+
+  <header class="page">
+    <p class="eyebrow">One logistics network · three people · three decisions</p>
+    <h1>Same data, three different dashboards — because each person is making a different decision</h1>
+    <p class="lede">Three existing warehouses (Paris, Lyon, Lille) serve 20 French cities. The sustainability manager, the operations manager and the network planner each look at this same network — and each needs a different chart to decide.</p>
+  </header>
+
+  <div class="grid g-5-7">
+    <section class="card">
+      <h3>The network today</h3>
+      <p class="sub">Each city is served by its nearest warehouse (triangles). Circle size = estimated demand.</p>
+      <svg class="map" id="map" role="img" aria-label="Map of the current network"></svg>
+      <div class="legend" id="mapLegend" style="margin-top:10px"></div>
+    </section>
+    <div class="dash-cards" style="grid-template-columns:1fr" id="cards">
+      <a class="card dash" href="co2.html">
+        <span class="for">Sustainability / CSR manager</span>
+        <h3>CO₂ dashboard</h3>
+        <p class="q">Which routes should we prioritize for consolidation or a shift to rail?</p>
+        <div class="big num" id="hCo2">…</div>
+        <div class="chart-choice"><b>Ranked bars</b> for "which route", a <b>map</b> for "where" — no pie: comparing 10 routes by angle is a weak reading task.</div>
+        <span class="go">Open →</span>
+      </a>
+      <a class="card dash" href="cost.html">
+        <span class="for">Logistics / operations manager</span>
+        <h3>Cost dashboard</h3>
+        <p class="q">For each warehouse, is the cost problem transport or storage?</p>
+        <div class="big num" id="hCost">…</div>
+        <div class="chart-choice"><b>Stacked bars</b> show total and split at once; an <b>exact-figures table</b> for negotiating; <b>no map</b> — this decision is about which lever, not where.</div>
+        <span class="go">Open →</span>
+      </a>
+      <a class="card dash" href="network.html">
+        <span class="for">Strategic / network planning manager</span>
+        <h3>Network dashboard</h3>
+        <p class="q">Open a warehouse in Bordeaux or Marseille, or close Lille?</p>
+        <div class="big num" id="hNet">…</div>
+        <div class="chart-choice"><b>Bars</b> for four discrete options (a line would imply you can interpolate), <b>side-by-side maps</b> as the main evidence, and a <b>who-gains chart</b>.</div>
+        <span class="go">Open →</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="assume" id="assume"></div>
+  <footer>Recomputed by a GitHub Action from <code>data/cities.csv</code> · France outline: gregoiredavid/france-geojson (Etalab Open Licence)</footer>
+</div>
+<div id="tip"></div>
+<script>
+Promise.all([UI.load('data/co2.json'), UI.load('data/cost.json'), UI.load('data/network.json')]).then(([co2, cost, net]) => {
+  const { $, fmt, esc, row } = UI;
+  $('hCo2').innerHTML = `${UI.tonnes(co2.total_co2_kg)} <small>CO₂ / year</small>`;
+  $('hCost').innerHTML = `${UI.eurM(cost.network.total_cost_eur)} <small>/ year</small>`;
+  const base = net.scenarios.find(s => s.scenario.startsWith('baseline')), best = net.scenarios[0];
+  $('hNet').innerHTML = `${esc(best.scenario)} <small>${fmt(best.avg_distance_km_population_weighted)} km vs ${fmt(base.avg_distance_km_population_weighted)} km today</small>`;
+
+  const cities = co2.all_cities;
+  const maxD = Math.max(...cities.map(c => c.demand_tonnes));
+  drawNetworkMap($('map'), cities, {
+    lineColor: c => UI.whColor(c.warehouse), lineWidth: () => 1.6, lineOpacity: .55,
+    dotColor: c => UI.whColor(c.warehouse), dotR: c => 3 + 9 * Math.sqrt(c.demand_tonnes / maxD),
+    whFill: c => UI.whColor(c.city), whR: 10,
+    label: c => c.demand_tonnes > 15000,
+    tip: c => `<div class="tt-title">${esc(c.city)}${c.city === c.warehouse ? ' (warehouse)' : ''}</div>` +
+      row('Served by', esc(c.warehouse)) + row('Distance', fmt(c.distance_km) + ' km') + row('Demand', fmt(c.demand_tonnes) + ' t/yr'),
+  });
+  $('mapLegend').innerHTML = ['Paris', 'Lyon', 'Lille'].map(w => `<span><i style="background:${UI.whColor(w)}"></i>${w}</span>`).join('') +
+    '<span><i class="tri"></i>Warehouse</span>';
+  $('assume').innerHTML = `<b>Read every number with its assumptions.</b> Demand is a <b>population proxy</b> (${co2.assumptions.tonnes_per_1000_residents_per_year} t per 1,000 residents per year), not shipment data. CO₂ uses ${co2.assumptions.co2_factor_kg_per_tonne_km} kg CO₂e per tonne-km, inside the cited 0.047–0.12 range (check ADEME Base Empreinte). Cost figures (${cost.assumptions.cost_eur_per_tonne_km} €/tonne-km, ${cost.assumptions.storage_cost_eur_per_tonne_year} €/tonne/year) are illustrative, not sourced. Distances are straight-line, from real coordinates.`;
+}).catch(e => UI.fail(document.querySelector('.wrap'), e));
+</script>
+</body>
+</html>
