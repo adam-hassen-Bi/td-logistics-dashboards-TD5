@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CO₂ Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .factor { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; margin-top: 16px; }
+  @media (max-width: 640px) { .factor { grid-template-columns: 1fr; } }
+  .factor h3 { margin: 0; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .factor .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-3); }
+  .factor .now { font-size: 14px; font-weight: 600; white-space: nowrap; }
+</style>
+<script src="js/ui.js"></script>
+<script src="js/france-map-background.js"></script>
+<script src="js/map.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav class="top"><a href="index.html">Overview</a><a class="on" href="co2.html">CO₂ · sustainability</a><a href="cost.html">Cost · operations</a><a href="network.html">Network · strategy</a></nav>
+  <header class="page">
+    <p class="eyebrow">For the sustainability / CSR manager</p>
+    <h1>Which routes should we prioritize to cut network CO₂?</h1>
+    <p class="lede">Decision this supports: which delivery routes are the best candidates for consolidation or a shift to rail, and which warehouse is the least CO₂-efficient per tonne delivered.</p>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <section class="card factor">
+    <div><h3>CO₂ factor</h3><p class="sub" style="margin:0">Move it across the cited range — every number on the page follows.</p></div>
+    <div><input type="range" id="f" min="0.047" max="0.12" step="0.001" aria-label="CO2 factor in kg per tonne-km">
+      <div class="ends num"><span>0.047 · French guide, long-haul semi-trailer</span><span>0.12 · upper cited value</span></div></div>
+    <div class="now num" id="fNow"></div>
+  </section>
+
+  <h2 class="section">Highest-CO₂ routes</h2>
+  <p class="why">A ranked list of specific, actionable routes is what a <b>sorted bar chart</b> is for: each bar is one route someone could consolidate or move to rail, and lengths compare far more precisely than pie wedges.</p>
+  <div class="grid g-7-5">
+    <section class="card">
+      <h3>Top 10 routes by CO₂ per year</h3>
+      <p class="sub">Warehouse → city, with the route's share of the whole network.</p>
+      <ul class="rows" id="routes"></ul>
+    </section>
+    <section class="card">
+      <h3>By warehouse</h3>
+      <p class="sub">Total CO₂ and CO₂ per tonne delivered — the efficiency question.</p>
+      <div class="table-wrap"><table id="wh"></table></div>
+      <p class="note" id="whNote"></p>
+    </section>
+  </div>
+
+  <h2 class="section">Where emissions concentrate</h2>
+  <p class="why">Rail shift and consolidation depend on regional infrastructure, so the decision is also about <b>where</b>. Each line is a route drawn from its warehouse, thicker and darker = more CO₂. Warehouses are <b>triangles</b> — a shape, not only a colour, so it survives grayscale and colour blindness — which answers a second question at a glance: is CO₂ piling up near a warehouse (fixable by re-routing) or far from all of them (fixable only by a new site)?</p>
+  <section class="card">
+    <div class="legend"><span><i class="tri"></i>Existing warehouse</span><span><i class="dot" style="background:var(--seq-lo)"></i>→<i class="dot" style="background:var(--seq-hi)"></i>City, low → high CO₂ (circle size too)</span></div>
+    <svg class="map" id="map" role="img" aria-label="Map of CO2 by route" style="max-width:640px;margin:0 auto"></svg>
+  </section>
+
+  <div class="assume" id="assume"></div>
+  <footer>Recomputed by a GitHub Action from <code>data/cities.csv</code> · Straight-line distances from real coordinates</footer>
+</div>
+<div id="tip"></div>
+<script>
+UI.load('data/co2.json').then(d => {
+  const { $, fmt, esc, row } = UI;
+  const F0 = d.assumptions.co2_factor_kg_per_tonne_km;
+  let f = F0;
+  const k = v => v * f / F0;   // every CO2 value is linear in the factor
+  $('f').value = F0;
+
+  function render() {
+    $('fNow').textContent = fmt(f, 3) + ' kg / t·km' + (Math.abs(f - F0) < 1e-9 ? ' (default)' : '');
+    const top3 = d.top_links.slice(0, 3).reduce((s, l) => s + l.share_of_network, 0);
+    const wh = [...d.by_warehouse].sort((a, b) => b.co2_kg_per_tonne - a.co2_kg_per_tonne);
+    $('kpis').innerHTML = `
+      <div class="card kpi"><div class="k">Network CO₂ per year</div><div class="v num">${UI.tonnes(k(d.total_co2_kg))}</div>
+        <div class="d num">${UI.tonnes(d.sensitivity.total_co2_kg_low)} – ${UI.tonnes(d.sensitivity.total_co2_kg_high)} across the cited factor range</div></div>
+      <div class="card kpi"><div class="k">CO₂ per tonne delivered</div><div class="v num">${fmt(k(d.co2_kg_per_tonne_network_avg), 1)} <small>kg</small></div>
+        <div class="d">network average</div></div>
+      <div class="card kpi"><div class="k">Least efficient warehouse</div><div class="v num">${esc(wh[0].warehouse)} <small>${fmt(k(wh[0].co2_kg_per_tonne), 1)} kg/t</small></div>
+        <div class="d num">vs ${esc(wh[1].warehouse)} ${fmt(k(wh[1].co2_kg_per_tonne), 1)} kg/t</div></div>
+      <div class="card kpi"><div class="k">Top 3 routes</div><div class="v num">${UI.pct(top3)}</div>
+        <div class="d">of all network CO₂</div></div>`;
+
+    const max = d.top_links[0].co2_kg;
+    $('routes').innerHTML = d.top_links.map((l, i) => `<li data-i="${i}">
+        <span class="nm">${esc(l.warehouse)} → <b>${esc(l.city)}</b></span>
+        <span class="track"><span class="seg" style="width:${l.co2_kg / max * 100}%;background:var(--accent);border-radius:0 4px 4px 0"></span></span>
+        <span class="val num"><b>${UI.tonnes(k(l.co2_kg))}</b> · ${UI.pct(l.share_of_network)}</span></li>`).join('');
+    $('routes').querySelectorAll('li').forEach(li => {
+      const l = d.top_links[+li.dataset.i];
+      UI.bindTip(li, () => `<div class="tt-title">${esc(l.warehouse)} → ${esc(l.city)}</div>` + row('CO₂ / year', UI.tonnes(k(l.co2_kg))) +
+        row('Distance', fmt(l.distance_km) + ' km') + row('Demand', fmt(l.demand_tonnes) + ' t/yr') + row('Share of network', UI.pct(l.share_of_network)));
+    });
+
+    $('wh').innerHTML = `<thead><tr><th>Warehouse</th><th>CO₂ / year</th><th>Tonnes</th><th>kg CO₂ / t</th></tr></thead><tbody>` +
+      wh.map(w => `<tr><td><b>${esc(w.warehouse)}</b></td><td class="num">${UI.tonnes(k(w.total_co2_kg))}</td><td class="num">${fmt(w.tonnes)}</td><td class="num">${fmt(k(w.co2_kg_per_tonne), 1)}</td></tr>`).join('') + '</tbody>';
+    const lille = d.by_warehouse.find(w => w.warehouse === 'Lille');
+    $('whNote').textContent = lille && lille.total_co2_kg === 0
+      ? 'Lille shows 0 t: every other city is closer to Paris or Lyon, so Lille only serves its own market. It looks idle here — the network dashboard shows why closing it still adds CO₂.' : '';
+
+    const cities = d.all_cities, cmax = Math.max(...cities.map(c => c.co2_kg));
+    drawNetworkMap($('map'), cities, {
+      lineColor: c => UI.seq(c.co2_kg / cmax), lineWidth: c => 1 + 7 * c.co2_kg / cmax, lineOpacity: .85,
+      dotColor: c => UI.seq(c.co2_kg / cmax), dotR: c => 3 + 9 * Math.sqrt(c.co2_kg / cmax),
+      whR: 10, label: c => c.co2_kg / cmax > .25,
+      tip: c => `<div class="tt-title">${esc(c.city)}${c.city === c.warehouse ? ' (warehouse)' : ''}</div>` +
+        (c.city === c.warehouse ? row('Local demand', fmt(c.demand_tonnes) + ' t/yr') + row('CO₂', '0 t (served on site)')
+          : row('Served by', esc(c.warehouse)) + row('Distance', fmt(c.distance_km) + ' km') + row('CO₂ / year', UI.tonnes(k(c.co2_kg)))),
+    });
+  }
+  $('f').addEventListener('input', e => { f = +e.target.value; render(); });
+  $('assume').innerHTML = `<b>Assumptions.</b> CO₂ = distance × demand × factor. The default ${F0} kg CO₂e per tonne-km is a round figure inside the cited range for French/European road freight (0.047 in the French Ministry of Ecology guide, up to about 0.12 depending on vehicle, load factor and empty return) — check ADEME's current Base Empreinte figure before citing it. Demand is a <b>population proxy</b>: ${d.assumptions.tonnes_per_1000_residents_per_year} t per 1,000 residents per year, not measured shipments. Distances are straight lines, shorter than real roads.`;
+  render();
+}).catch(e => UI.fail(document.querySelector('.wrap'), e));
+</script>
+</body>
+</html>
