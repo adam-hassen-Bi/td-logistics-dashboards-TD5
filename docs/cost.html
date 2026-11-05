@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cost Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<style>
+  .stack li { grid-template-columns: 80px 1fr 120px; min-height: 52px; }
+  .stack .track { height: 30px; }
+  .stack .seg { display: flex; align-items: center; padding: 0 8px; font-size: 12px; font-weight: 600; color: #fff; overflow: hidden; white-space: nowrap; }
+  .stack .seg.t { background: var(--transport); }
+  .stack .seg.s { background: var(--storage); }
+  .stack .seg:only-child, .stack .seg.s:last-child { border-radius: 0 4px 4px 0; }
+  .lever { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--grid); font-size: 14px; color: var(--text-2); }
+  .lever b { color: var(--text); }
+</style>
+<script src="js/ui.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <nav class="top"><a href="index.html">Overview</a><a href="co2.html">CO₂ · sustainability</a><a class="on" href="cost.html">Cost · operations</a><a href="network.html">Network · strategy</a></nav>
+  <header class="page">
+    <p class="eyebrow">For the logistics / operations manager</p>
+    <h1>Where does logistics cost concentrate — and which lever matters?</h1>
+    <p class="lede">Decision this supports: for each warehouse, is its cost problem mainly transport (routes too long) or storage (too much stock held) — because the fix is different for each.</p>
+  </header>
+
+  <div class="kpis" id="kpis"></div>
+
+  <h2 class="section">Cost per warehouse, split by lever</h2>
+  <p class="why">A plain bar would show the total but hide the split; one pie per warehouse would show the split but make warehouses hard to compare (angles across separate pies). A <b>stacked bar</b> shows both at once: length = total, segments = which lever. Switch to <b>per tonne</b> to separate "big because it handles a lot" from "expensive for what it handles".</p>
+  <section class="card">
+    <div class="card-head">
+      <div class="legend" style="margin:0"><span><i style="background:var(--transport)"></i>Transport</span><span><i style="background:var(--storage)"></i>Storage</span></div>
+      <div class="seg-ctrl" id="mode"><button data-m="total" class="on">Total € / year</button><button data-m="tonne">€ per tonne</button></div>
+    </div>
+    <ul class="rows stack" id="stack" style="margin-top:14px"></ul>
+    <div class="lever" id="lever"></div>
+  </section>
+
+  <h2 class="section">Highest-cost routes</h2>
+  <p class="why">Someone renegotiating a route needs the <b>exact figure</b>, not a visual estimate — so this is a <b>table</b>, not a chart. There is no map on this page on purpose: the decision is which lever to pull, not where; a map would add clutter, not evidence.</p>
+  <section class="card">
+    <div class="table-wrap"><table id="links"></table></div>
+  </section>
+
+  <div class="assume" id="assume"></div>
+  <footer>Recomputed by a GitHub Action from <code>data/cities.csv</code> · Illustrative cost assumptions</footer>
+</div>
+<div id="tip"></div>
+<script>
+UI.load('data/cost.json').then(d => {
+  const { $, fmt, esc, row } = UI;
+  const wh = d.by_warehouse, net = d.network;
+  const meanOfMeans = wh.reduce((s, w) => s + w.cost_eur_per_tonne, 0) / wh.length;
+  const top = wh[0];
+  $('kpis').innerHTML = `
+    <div class="card kpi"><div class="k">Network cost per year</div><div class="v num">${UI.eurM(net.total_cost_eur)}</div>
+      <div class="d num">${UI.eurM(net.transport_cost_eur)} transport · ${UI.eurM(net.storage_cost_eur)} storage</div></div>
+    <div class="card kpi"><div class="k">Cost per tonne</div><div class="v num">€${fmt(net.cost_eur_per_tonne_weighted, 2)}</div>
+      <div class="d num">weighted by tonnes (plain mean of warehouses: €${fmt(meanOfMeans, 2)})</div></div>
+    <div class="card kpi"><div class="k">Transport share</div><div class="v num">${UI.pct(net.transport_cost_eur / net.total_cost_eur)}</div>
+      <div class="d">of network cost — the rest is storage</div></div>
+    <div class="card kpi"><div class="k">Highest-cost warehouse</div><div class="v num">${esc(top.warehouse)} <small>${UI.eurM(top.total_cost_eur)}</small></div>
+      <div class="d num">${UI.pct(top.total_cost_eur / net.total_cost_eur)} of the network, ${top.n_cities_served} cities served</div></div>`;
+
+  let mode = 'total';
+  function render() {
+    const val = w => mode === 'total' ? [w.transport_cost_eur, w.storage_cost_eur] : [w.transport_cost_eur / w.tonnes, w.storage_cost_eur / w.tonnes];
+    const max = Math.max(...wh.map(w => val(w)[0] + val(w)[1]));
+    const lab = v => mode === 'total' ? UI.eurM(v) : '€' + fmt(v, 1);
+    $('stack').innerHTML = wh.map((w, i) => {
+      const [t, s] = val(w);
+      const seg = (cls, v) => v > 0 ? `<span class="seg ${cls}" style="width:${v / max * 100}%">${v / max > .14 ? lab(v) : ''}</span>` : '';
+      return `<li data-i="${i}"><span class="nm"><b>${esc(w.warehouse)}</b></span><span class="track">${seg('t', t)}${seg('s', s)}</span>
+        <span class="val num"><b>${lab(t + s)}</b>${mode === 'total' ? ' / yr' : ' / t'}</span></li>`;
+    }).join('');
+    $('stack').querySelectorAll('li').forEach(li => {
+      const w = wh[+li.dataset.i];
+      UI.bindTip(li, `<div class="tt-title">${esc(w.warehouse)}</div>` + row('Transport', UI.eurM(w.transport_cost_eur) + ' · €' + fmt(w.transport_cost_eur / w.tonnes, 1) + '/t') +
+        row('Storage', UI.eurM(w.storage_cost_eur) + ' · €' + fmt(w.storage_cost_eur / w.tonnes, 1) + '/t') + row('Tonnes handled', fmt(w.tonnes)) +
+        row('Cities served', w.n_cities_served) + row('Average haul', fmt(w.avg_haul_km) + ' km'));
+    });
+    const paris = wh.find(w => w.warehouse === 'Paris');
+    $('lever').innerHTML = mode === 'total'
+      ? `In euros, <b>storage is the bigger segment everywhere</b> (${UI.pct(1 - top.transport_share)} of ${esc(top.warehouse)}'s cost). Switch to per tonne before deciding which lever that means.`
+      : `Per tonne, <b>storage is the same €${fmt(d.assumptions.storage_cost_eur_per_tonne_year)} at every warehouse</b> — it only grows with volume. What differs is <b>transport</b>: €${fmt(top.transport_cost_eur / top.tonnes, 1)}/t at ${esc(top.warehouse)} (average haul ${fmt(top.avg_haul_km)} km) against €${fmt(paris.transport_cost_eur / paris.tonnes, 1)}/t at Paris (${fmt(paris.avg_haul_km)} km). That gap is the lever specific to ${esc(top.warehouse)}.`;
+  }
+  document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => {
+    mode = b.dataset.m; document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b)); render();
+  }));
+  render();
+
+  $('links').innerHTML = `<thead><tr><th>Route</th><th>Distance</th><th>Demand</th><th>Transport cost / year</th><th>Share of transport</th></tr></thead><tbody>` +
+    d.top_links.map(l => `<tr><td>${esc(l.warehouse)} → <b>${esc(l.city)}</b></td><td class="num">${fmt(l.distance_km, 1)} km</td><td class="num">${fmt(l.demand_tonnes)} t</td>
+      <td class="num"><b>€${fmt(l.transport_cost_eur)}</b></td><td class="num">${UI.pct(l.transport_cost_eur / net.transport_cost_eur)}</td></tr>`).join('') + '</tbody>';
+
+  $('assume').innerHTML = `<b>Assumptions — illustrative, not researched market rates.</b> Transport €${d.assumptions.cost_eur_per_tonne_km} per tonne-km, storage €${d.assumptions.storage_cost_eur_per_tonne_year} per tonne per year. Unlike the CO₂ factor, there is no single published reference for these: real transport pricing is commercial and variable. Demand is a population proxy (50 t per 1,000 residents per year).`;
+}).catch(e => UI.fail(document.querySelector('.wrap'), e));
+</script>
+</body>
+</html>
